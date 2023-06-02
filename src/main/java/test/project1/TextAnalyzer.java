@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
+import io.vertx.core.Future;
 import test.project1.repository.WordsRepository;
 
 public class TextAnalyzer {
@@ -17,6 +18,8 @@ public class TextAnalyzer {
 	
 	private Map<Integer, SortedSet<String>> words = new HashMap<>();
 	private List<String> sortedWords = new ArrayList<>();
+	
+	private boolean initialized = true; 
 		
 	public TextAnalyzer(CharacterValueCalculator valueCalculator, WordsRepository repository) {
 		this.valueCalculator = valueCalculator;
@@ -26,57 +29,70 @@ public class TextAnalyzer {
 	}
 	
 	private void init() {
-		this.sortedWords = repository.readWords();
-		Collections.sort(this.sortedWords);
-		
-		this.sortedWords.forEach(word -> {
-			Integer wordValue = this.valueCalculator.calculate(word);
-			if (!words.containsKey(wordValue)) {
-				words.put(wordValue, new TreeSet<String>());
-			}
-			words.get(wordValue).add(word);
+		repository.readWords().andThen(result -> {
+			this.sortedWords = result.result();
+			
+			Collections.sort(this.sortedWords);	
+			this.sortedWords.forEach(word -> {
+				Integer wordValue = this.valueCalculator.calculate(word);
+				if (!words.containsKey(wordValue)) {
+					words.put(wordValue, new TreeSet<String>());
+				}
+				words.get(wordValue).add(word);
+			});
+			
+			this.initialized =  true;
+			System.out.println("Initialized With "+this.sortedWords.size()+ " words");
 		});
 	}
 	
-	public TextAnalyzerResult analyze(String text) {
-		Integer wordValue = this.valueCalculator.calculate(text);
-		if (!words.containsKey(wordValue)) {
-			words.put(wordValue, new TreeSet<String>());
-		}
-		words.get(wordValue).add(text);
+	public Future<TextAnalyzerResult> analyze(String text) {
 		
-		String closestValuedWord = null;
-		int closestValue = getClosestWordValue(wordValue);
-		SortedSet<String> closestWords = words.get(closestValue);
-		if (closestWords != null && !closestWords.isEmpty()) {
-			closestValuedWord = closestWords.first();
+		if (!initialized) {
+			throw new RuntimeException("TextAnalyzer is not initialized");
 		}
-		
-		String closestLexicalWord = null;
-		if (!sortedWords.contains(text)) {
-			sortedWords.add(text);
-			Collections.sort(sortedWords);
+				
+		return Future.future(handler -> {
 			
-			this.repository.save(text);
-		}
-		
-		int index = sortedWords.indexOf(text);
-		int listSize = sortedWords.size();
-		if (listSize > 1) {
-			if (index == 0 && listSize > 1) {
-				closestLexicalWord = sortedWords.get(1);
-			}else if (index == (listSize - 1)) {
-				closestLexicalWord = sortedWords.get(listSize - 2);
-			}else {
-				String previousWord = sortedWords.get(index - 1); 
-				String nextWord = sortedWords.get(index + 1);
-				int previousWordCompare = Math.abs(text.compareTo(previousWord));
-				int nextWordCompare = Math.abs(text.compareTo(nextWord));
-				closestLexicalWord = previousWordCompare <= nextWordCompare ? previousWord : nextWord;
+			Integer wordValue = this.valueCalculator.calculate(text);
+			if (!words.containsKey(wordValue)) {
+				words.put(wordValue, new TreeSet<String>());
 			}
-		}
-		
-		return new TextAnalyzerResult(closestValuedWord, closestLexicalWord);
+			words.get(wordValue).add(text);
+			
+			String closestValuedWord = null;
+			int closestValue = getClosestWordValue(wordValue);
+			SortedSet<String> closestWords = words.get(closestValue);
+			if (closestWords != null && !closestWords.isEmpty()) {
+				closestValuedWord = closestWords.first();
+			}
+			
+			if (!sortedWords.contains(text)) {
+				sortedWords.add(text);
+				Collections.sort(sortedWords);
+				
+				this.repository.save(text);
+			}
+
+			String closestLexicalWord = null;
+			int index = sortedWords.indexOf(text);
+			int listSize = sortedWords.size();
+			if (listSize > 1) {
+				if (index == 0 && listSize > 1) {
+					closestLexicalWord = sortedWords.get(1);
+				}else if (index == (listSize - 1)) {
+					closestLexicalWord = sortedWords.get(listSize - 2);
+				}else {
+					String previousWord = sortedWords.get(index - 1); 
+					String nextWord = sortedWords.get(index + 1);
+					int previousWordCompare = Math.abs(text.compareTo(previousWord));
+					int nextWordCompare = Math.abs(text.compareTo(nextWord));
+					closestLexicalWord = previousWordCompare <= nextWordCompare ? previousWord : nextWord;
+				}
+			}
+			handler.complete(new TextAnalyzerResult(closestValuedWord, closestLexicalWord));
+			
+		});
 	}
 	
 	private Integer getClosestWordValue(int givenTextValue) {
@@ -92,14 +108,5 @@ public class TextAnalyzer {
 		    }
 		}
 		return closestValue;
-	}
-	
-	public static void main(String[] args) {
-		String a = "abc";
-		String b = "zzz";
-		
-		System.out.println(a.compareTo(b));
-		
-		
 	}
 }

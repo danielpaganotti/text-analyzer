@@ -34,14 +34,15 @@ public class Server extends AbstractVerticle {
 		.handler(context -> {
 			JsonObject json = context.body().asJsonObject();
 			
-			TextAnalyzerResult result = analyzer.analyze(json.getString("text"));
-			JsonObject jsonResult = new JsonObject();
-			jsonResult.put("value", result.getValue());
-			jsonResult.put("lexical", result.getLexical());
-			
-			HttpServerResponse response = context.response();
-			response.putHeader("content-type", "text/json")
-			.end(jsonResult.toBuffer());
+			analyzer.analyze(json.getString("text")).andThen(handler -> {
+				JsonObject jsonResult = new JsonObject();
+				jsonResult.put("value", handler.result().getValue());
+				jsonResult.put("lexical", handler.result().getLexical());
+				
+				HttpServerResponse response = context.response();
+				response.putHeader("content-type", "text/json")
+				.end(jsonResult.toBuffer());
+			});
 		});
 		
 		vertx.createHttpServer().requestHandler(router)

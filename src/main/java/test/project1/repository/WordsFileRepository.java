@@ -1,41 +1,73 @@
 package test.project1.repository;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.vertx.core.Future;
+import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.file.AsyncFile;
+import io.vertx.core.file.FileSystem;
+import io.vertx.core.file.OpenOptions;
+import io.vertx.core.parsetools.RecordParser;
+
 public class WordsFileRepository implements WordsRepository {
 
-	public void save(String word) {
-		try (BufferedWriter writer = new BufferedWriter(new FileWriter("words.txt", true))){
-			writer.append(word);
-			writer.append("\n");
-			
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+	private final FileSystem fs;
+	
+	public WordsFileRepository() {
+		fs = Vertx.vertx().fileSystem(); 
 	}
 	
-	public List<String> readWords(){
-		List<String> words = new ArrayList<String>();
-		try (BufferedReader br = new BufferedReader(new FileReader("words.txt"))) {
-		    String line;
-		    while ((line = br.readLine()) != null) {
-		    	words.add(line);
-		    }
-		} catch (FileNotFoundException e) {
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+	public Future<Void> save(String word) {
+		OpenOptions opts = new OpenOptions();
+		opts.setAppend(true);
 		
-		return words;
+		return 
+			fs.open("words.txt", opts)
+				.compose(handler -> {
+					Promise<AsyncFile> p = Promise.promise();
+					
+					handler.write(Buffer.buffer(word+"\n"))
+						.onSuccess(handler1 -> p.complete());
+					return p.future();
+					
+				}).compose(handler -> {
+					return handler.close();
+				});
+		
 	}
+	
+	public Future<List<String>> readWords(){
+		OpenOptions opts = new OpenOptions();
+		opts.setRead(true);
+		opts.setWrite(false);
+		
+		List<String> words = new ArrayList<>();
+		Promise<List<String>> promise = Promise.promise();
+		
+		fs.exists("words.txt").onComplete(result -> {
+			if (result.result()) {
+				fs.open("words.txt", opts)
+				.andThen(file -> {
+					file.result().handler(
+						RecordParser.newDelimited("\n", line -> {
+							System.out.println("reading line="+line);
+							words.add(line.toString());
+						})
+					);
+					
+					file.result().endHandler(end -> {
+						file.result().close();
+						promise.complete(words);
+					});
+				});
+			}else {
+				promise.complete(words);
+			}			
+		});
 
-    
+		return promise.future();
+	}    
 }
